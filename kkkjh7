@@ -1,725 +1,481 @@
--- Полный исправленный скрипт бота для Roblox
+-- Оптимизированный скрипт бота для Roblox
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
--- Владелец бота (только он может использовать команды)
 local OWNER_NAME = "ryveliq"
 local BOT_NAME = "NoNameDarkTouched"
 
--- Система команд
-local CommandSystem = {
-    ActiveEffects = {},
-    CommandHistory = {}
-}
+local CommandSystem = {ActiveEffects = {}}
 
--- Функция для остановки всех эффектов
 function CommandSystem:stopAllEffects()
-    for name, connection in pairs(self.ActiveEffects) do
-        if connection then
-            connection:Disconnect()
-        end
-    end
+    for _, v in pairs(self.ActiveEffects) do v:Disconnect() end
     self.ActiveEffects = {}
 end
 
--- Функция для получения расстояния между игроками
-function CommandSystem:getDistance(player1, player2)
-    if not player1.Character or not player2.Character then return 999 end
-    local hrp1 = player1.Character:FindFirstChild("HumanoidRootPart")
-    local hrp2 = player2.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp1 or not hrp2 then return 999 end
-    return (hrp1.Position - hrp2.Position).Magnitude
+function CommandSystem:getDistance(p1, p2)
+    if not p1.Character or not p2.Character then return 999 end
+    local h1, h2 = p1.Character:FindFirstChild("HumanoidRootPart"), p2.Character:FindFirstChild("HumanoidRootPart")
+    return h1 and h2 and (h1.Position - h2.Position).Magnitude or 999
 end
 
--- Функция для изменения скорости бота
-function CommandSystem:setSpeed(speedValue)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    if not botPlayer or not botPlayer.Character then return false end
-    
-    local speed = tonumber(speedValue)
-    if not speed or speed < 10 or speed > 100 then
-        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] Speed must be between 10-100!")
-        return false
-    end
-    
-    local humanoid = botPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid.WalkSpeed = speed
-        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] Speed set to " .. speed)
+function CommandSystem:setSpeed(speed)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    if not bot or not bot.Character then return false end
+    local hum = bot.Character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.WalkSpeed = tonumber(speed) or 16
+        self:sendMessage("Speed set to " .. (tonumber(speed) or 16))
         return true
     end
     return false
 end
 
--- Функция для флинга (исправленная по твоему примеру)
-function CommandSystem:flingTarget(targetHRP)
-    if not targetHRP or not targetHRP:IsA("BasePart") then return false end
+function CommandSystem:sendMessage(msg)
+    pcall(function()
+        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] " .. msg)
+    end)
+end
+
+function CommandSystem:flingTarget(targetPlayer)
+    if not targetPlayer or not targetPlayer.Character then return false end
     
-    local originalVelocity = targetHRP.Velocity
-    local flingPower = 50000
+    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then return false end
+
+    -- Создаем BodyThrust на цели
+    local thrust = Instance.new("BodyThrust")
+    thrust.Force = Vector3.new(100000, 100000, 100000)
+    thrust.Location = targetHRP.Position
+    thrust.Parent = targetHRP
     
-    -- Основной флинг (как в твоем скрипте)
-    targetHRP.Velocity = originalVelocity * flingPower + Vector3.new(0, flingPower, 0)
-    RunService.RenderStepped:Wait()
+    -- Даем дополнительный импульс
+    targetHRP.Velocity = Vector3.new(50000, 50000, 50000)
     
-    if targetHRP and targetHRP.Parent then
-        targetHRP.Velocity = originalVelocity
-    end
+    -- Ждем и убираем thrust
+    wait(0.2)
+    thrust:Destroy()
     
-    RunService.Stepped:Wait()
-    
-    if targetHRP and targetHRP.Parent then
-        targetHRP.Velocity = originalVelocity + Vector3.new(0, 0.1, 0)
-    end
+    -- Телепортируем высоко
+    targetHRP.CFrame = CFrame.new(0, 100000, 0)
     
     return true
 end
 
--- Функция для следования за игроком (с изменением позиции)
-function CommandSystem:startFollow(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+function CommandSystem:startFollow(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
 
     self:stopAllEffects()
     
-    local followConnection
-    local lastPositionChange = 0
+    local lastPosChange = 0
     local currentOffset = Vector3.new(2, 0, 2)
     
-    followConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not targetPlayer.Character then
-            followConnection:Disconnect()
-            return
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not target.Character then conn:Disconnect() return end
+        
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        local bHum = bot.Character:FindFirstChildOfClass("Humanoid")
+        
+        if not bHRP or not tHRP or not bHum then return end
+        
+        if tick() - lastPosChange > math.random(5, 6) then
+            lastPosChange = tick()
+            currentOffset = Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))
         end
         
-        local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local botHumanoid = botPlayer.Character:FindFirstChildOfClass("Humanoid")
-        
-        if not botHRP or not targetHRP or not botHumanoid then return end
-        
-        -- Менять позицию каждые 5-6 секунд если игрок стоит
-        if tick() - lastPositionChange > math.random(5, 6) then
-            lastPositionChange = tick()
-            currentOffset = Vector3.new(
-                math.random(-3, 3),
-                0,
-                math.random(-3, 3)
-            )
-        end
-        
-        local distance = (targetHRP.Position - botHRP.Position).Magnitude
-        if distance > 5 then
-            botHumanoid:MoveTo(targetHRP.Position + currentOffset)
+        if (tHRP.Position - bHRP.Position).Magnitude > 5 then
+            bHum:MoveTo(tHRP.Position + currentOffset)
         end
     end)
     
-    self.ActiveEffects["follow"] = followConnection
+    self.ActiveEffects["follow"] = conn
     return true
 end
 
--- Функция для сидения на голове (с анимацией сидения)
-function CommandSystem:startHeadsit(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+function CommandSystem:startHeadsit(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
 
     self:stopAllEffects()
     
-    -- Заставить бота сидеть
-    local humanoid = botPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid.Sit = true
-    end
+    local hum = bot.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.Sit = true end
     
-    local headsitConnection
-    headsitConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not targetPlayer.Character then
-            headsitConnection:Disconnect()
-            return
-        end
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not target.Character then conn:Disconnect() return end
         
-        local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        if not bHRP or not tHRP then return end
         
-        if not botHRP or not targetHRP then return end
-        
-        -- Позиция над головой
-        local headPosition = targetHRP.Position + Vector3.new(0, 4, 0)
-        botHRP.CFrame = CFrame.new(headPosition)
+        bHRP.CFrame = CFrame.new(tHRP.Position + Vector3.new(0, 4, 0))
     end)
     
-    self.ActiveEffects["headsit"] = headsitConnection
+    self.ActiveEffects["headsit"] = conn
     return true
 end
 
--- Функция для ковра
-function CommandSystem:startCarpet(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+function CommandSystem:startCarpet(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
 
     self:stopAllEffects()
     
-    local carpetConnection
-    carpetConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not targetPlayer.Character then
-            carpetConnection:Disconnect()
-            return
-        end
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not target.Character then conn:Disconnect() return end
         
-        local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        if not bHRP or not tHRP then return end
         
-        if not botHRP or not targetHRP then return end
-        
-        -- Позиция под игроком
-        local underPosition = targetHRP.Position - Vector3.new(0, 3, 0)
-        botHRP.CFrame = CFrame.new(underPosition)
+        bHRP.CFrame = CFrame.new(tHRP.Position - Vector3.new(0, 3, 0))
     end)
     
-    self.ActiveEffects["carpet"] = carpetConnection
+    self.ActiveEffects["carpet"] = conn
     return true
 end
 
--- Функция для флингования (исправленная)
-function CommandSystem:startFling(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+function CommandSystem:startFling(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
 
-    local distance = self:getDistance(botPlayer, targetPlayer)
-    if distance > 200 then
-        return false
-    end
+    if self:getDistance(bot, target) > 200 then return false end
 
     self:stopAllEffects()
     
-    local flingConnection
-    flingConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not targetPlayer.Character then
-            flingConnection:Disconnect()
-            return
-        end
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not target.Character then conn:Disconnect() return end
         
-        local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local botHumanoid = botPlayer.Character:FindFirstChildOfClass("Humanoid")
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        local bHum = bot.Character:FindFirstChildOfClass("Humanoid")
         
-        if not botHRP or not targetHRP or not botHumanoid then return end
+        if not bHRP or not tHRP or not bHum then return end
         
-        local currentDistance = self:getDistance(botPlayer, targetPlayer)
-        if currentDistance <= 40 then
-            -- Флинг цель
-            self:flingTarget(targetHRP)
+        if self:getDistance(bot, target) <= 40 then
+            self:flingTarget(target)
         else
-            -- Двигаться к цели
-            botHumanoid:MoveTo(targetHRP.Position)
+            bHum:MoveTo(tHRP.Position)
         end
     end)
     
-    self.ActiveEffects["fling"] = flingConnection
+    self.ActiveEffects["fling"] = conn
     return true
 end
 
--- Функция для танцев
-function CommandSystem:startDance(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+function CommandSystem:startDance(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
 
     self:stopAllEffects()
     
-    local danceConnection
-    local danceAngle = 0
-    danceConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not targetPlayer.Character then
-            danceConnection:Disconnect()
-            return
-        end
+    local angle = 0
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not target.Character then conn:Disconnect() return end
         
-        local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        if not bHRP or not tHRP then return end
         
-        if not botHRP or not targetHRP then return end
-        
-        -- Двигаться рядом и танцевать
-        local dancePosition = targetHRP.Position + Vector3.new(3, 0, 3)
-        danceAngle = danceAngle + 0.1
-        botHRP.CFrame = CFrame.new(dancePosition) * CFrame.Angles(0, danceAngle, 0)
+        angle = angle + 0.1
+        bHRP.CFrame = CFrame.new(tHRP.Position + Vector3.new(3, 0, 3)) * CFrame.Angles(0, angle, 0)
     end)
     
-    self.ActiveEffects["dance"] = danceConnection
+    self.ActiveEffects["dance"] = conn
     return true
 end
 
--- Функция для комплиментов
-function CommandSystem:sendLike(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer then return false end
-    if not targetPlayer then return false end
+function CommandSystem:sendLike(targetName)
+    local target = Players:FindFirstChild(targetName)
+    if not target then return false end
 
-    local distance = self:getDistance(botPlayer, targetPlayer)
-    if distance > 100 then
-        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] too far!")
+    if self:getDistance(Players:FindFirstChild(BOT_NAME), target) > 100 then
+        self:sendMessage("too far!")
         return false
     end
 
-    local compliments = {
-        "hey! you got awesome skin😁",
-        "hii, you look good!",
-        "I almost fainted, when I saw your skin😍",
-        "wow, amazing avatar!",
-        "you're looking great today!",
-        "nice style! 😊"
-    }
-    
-    local randomCompliment = compliments[math.random(1, #compliments)]
-    game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] " .. randomCompliment)
+    local compliments = {"hey! you got awesome skin😁", "hii, you look good!", "I almost fainted, when I saw your skin😍", "wow, amazing avatar!", "you're looking great today!"}
+    self:sendMessage(compliments[math.random(1, #compliments)])
     return true
 end
 
--- Функция для анимации bang
-function CommandSystem:startBang(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+function CommandSystem:startBang(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
 
     self:stopAllEffects()
     
-    local bangConnection
-    bangConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not targetPlayer.Character then
-            bangConnection:Disconnect()
-            return
-        end
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not target.Character then conn:Disconnect() return end
         
-        local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        if not bHRP or not tHRP then return end
         
-        if not botHRP or not targetHRP then return end
-        
-        -- Позиция сзади игрока
-        local behindPosition = targetHRP.Position - targetHRP.CFrame.LookVector * 3
-        botHRP.CFrame = CFrame.new(behindPosition) * CFrame.Angles(0, math.pi, 0)
+        bHRP.CFrame = CFrame.new(tHRP.Position - tHRP.CFrame.LookVector * 3) * CFrame.Angles(0, math.pi, 0)
     end)
     
-    self.ActiveEffects["bang"] = bangConnection
+    self.ActiveEffects["bang"] = conn
     return true
 end
 
--- Функция для вращения
 function CommandSystem:startSpin(speed)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    if not botPlayer or not botPlayer.Character then return false end
+    local bot = Players:FindFirstChild(BOT_NAME)
+    if not bot or not bot.Character then return false end
     
-    local speed = tonumber(speed) or 30
-    local humanoidRootPart = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not humanoidRootPart then return false end
+    local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+    if not bHRP then return false end
     
     self:stopAllEffects()
     
-    local spinConnection
     local angle = 0
-    spinConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not humanoidRootPart then
-            spinConnection:Disconnect()
-            return
-        end
-        
-        angle = angle + speed * 0.1
-        humanoidRootPart.CFrame = humanoidRootPart.CFrame * CFrame.Angles(0, math.rad(angle), 0)
+    local spd = tonumber(speed) or 30
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not bHRP then conn:Disconnect() return end
+        angle = angle + spd * 0.1
+        bHRP.CFrame = bHRP.CFrame * CFrame.Angles(0, math.rad(angle), 0)
     end)
     
-    self.ActiveEffects["spin"] = spinConnection
+    self.ActiveEffects["spin"] = conn
     return true
 end
 
--- Функция для прыжков (исправленная)
 function CommandSystem:startJump()
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    if not botPlayer or not botPlayer.Character then return false end
+    local bot = Players:FindFirstChild(BOT_NAME)
+    if not bot or not bot.Character then return false end
     
-    local humanoid = botPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return false end
+    local hum = bot.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
     
     self:stopAllEffects()
     
-    local jumpConnection
     local lastJump = 0
-    jumpConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not humanoid then
-            jumpConnection:Disconnect()
-            return
-        end
-        
-        -- Прыгать каждые 2 секунды
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not hum then conn:Disconnect() return end
         if tick() - lastJump > 2 then
             lastJump = tick()
-            humanoid.Jump = true
+            hum.Jump = true
         end
     end)
     
-    self.ActiveEffects["jump"] = jumpConnection
+    self.ActiveEffects["jump"] = conn
     return true
 end
 
--- Функция для телепорта к игроку
-function CommandSystem:startGoto(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
+function CommandSystem:startGoto(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
     
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+    local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+    local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+    if not bHRP or not tHRP then return false end
     
-    local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-    
-    if not botHRP or not targetHRP then return false end
-    
-    botHRP.CFrame = targetHRP.CFrame + Vector3.new(3, 0, 3)
+    bHRP.CFrame = tHRP.CFrame + Vector3.new(3, 0, 3)
     return true
 end
 
--- Функция для вращения вокруг игрока
-function CommandSystem:startOrbit(targetPlayerName, speed)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
-    
-    local speed = tonumber(speed) or 20
+function CommandSystem:startOrbit(targetName, speed)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
     
     self:stopAllEffects()
     
-    local orbitConnection
     local angle = 0
-    orbitConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not targetPlayer.Character then
-            orbitConnection:Disconnect()
-            return
-        end
+    local spd = tonumber(speed) or 20
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not target.Character then conn:Disconnect() return end
         
-        local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        if not bHRP or not tHRP then return end
         
-        if not botHRP or not targetHRP then return end
-        
-        angle = angle + speed * 0.01
-        local radius = 5
-        local x = math.cos(angle) * radius
-        local z = math.sin(angle) * radius
-        
-        local orbitPosition = targetHRP.Position + Vector3.new(x, 2, z)
-        botHRP.CFrame = CFrame.new(orbitPosition)
+        angle = angle + spd * 0.01
+        local x, z = math.cos(angle) * 5, math.sin(angle) * 5
+        bHRP.CFrame = CFrame.new(tHRP.Position + Vector3.new(x, 2, z))
     end)
     
-    self.ActiveEffects["orbit"] = orbitConnection
+    self.ActiveEffects["orbit"] = conn
     return true
 end
 
--- Функция для отправки запроса в друзья
-function CommandSystem:sendFriendRequest(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer then return false end
-    if not targetPlayer then return false end
-
-    pcall(function()
-        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] Sent friend request to " .. targetPlayerName)
-    end)
+function CommandSystem:sendFriendRequest(targetName)
+    self:sendMessage("Sent friend request to " .. targetName)
     return true
 end
 
--- Функция для взгляда на игрока (исправленная)
-function CommandSystem:startLook(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+function CommandSystem:startLook(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
 
     self:stopAllEffects()
     
-    local lookConnection
-    lookConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not targetPlayer.Character then
-            lookConnection:Disconnect()
-            return
-        end
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not target.Character then conn:Disconnect() return end
         
-        local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        if not bHRP or not tHRP then return end
         
-        if not botHRP or not targetHRP then return end
-        
-        -- Смотреть на игрока (исправлено)
-        local lookAt = targetHRP.Position
-        botHRP.CFrame = CFrame.lookAt(botHRP.Position, Vector3.new(lookAt.X, botHRP.Position.Y, lookAt.Z))
+        local lookAt = tHRP.Position
+        bHRP.CFrame = CFrame.lookAt(bHRP.Position, Vector3.new(lookAt.X, bHRP.Position.Y, lookAt.Z))
     end)
     
-    self.ActiveEffects["look"] = lookConnection
+    self.ActiveEffects["look"] = conn
     return true
 end
 
--- Функция для ресета бота
 function CommandSystem:resetBot()
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    if not botPlayer then return false end
+    local bot = Players:FindFirstChild(BOT_NAME)
+    if not bot then return false end
     
     self:stopAllEffects()
-    
-    if botPlayer.Character then
-        botPlayer.Character:BreakJoints()
-    end
-    
+    if bot.Character then bot.Character:BreakJoints() end
     return true
 end
 
--- Функция для махания
-function CommandSystem:startWave(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+function CommandSystem:startWave(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
 
-    local distance = self:getDistance(botPlayer, targetPlayer)
-    if distance > 100 then
-        return false
-    end
+    if self:getDistance(bot, target) > 100 then return false end
 
     self:stopAllEffects()
     
-    -- Телепортироваться ближе
-    local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+    local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+    if bHRP and tHRP then bHRP.CFrame = tHRP.CFrame + Vector3.new(5, 0, 5) end
     
-    if botHRP and targetHRP then
-        botHRP.CFrame = targetHRP.CFrame + Vector3.new(5, 0, 5)
-    end
-    
-    -- Отправить сообщение с маханием
-    game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] 👋 Hello " .. targetPlayerName .. "!")
+    self:sendMessage("👋 Hello " .. targetName .. "!")
     return true
 end
 
--- Функция для охраны (исправленная)
-function CommandSystem:startGuard(targetPlayerName)
-    local botPlayer = Players:FindFirstChild(BOT_NAME)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
-    
-    if not botPlayer or not botPlayer.Character then return false end
-    if not targetPlayer or not targetPlayer.Character then return false end
+function CommandSystem:startGuard(targetName)
+    local bot = Players:FindFirstChild(BOT_NAME)
+    local target = Players:FindFirstChild(targetName)
+    if not bot or not bot.Character or not target or not target.Character then return false end
 
     self:stopAllEffects()
     
-    -- Установить скорость бота
-    local botHumanoid = botPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if botHumanoid then
-        botHumanoid.WalkSpeed = 23
-    end
+    local botHum = bot.Character:FindFirstChildOfClass("Humanoid")
+    if botHum then botHum.WalkSpeed = 23 end
     
-    local guardConnection
-    local lastAction = 0
-    local lastPositionChange = 0
+    local lastAction, lastPosChange = 0, 0
     local guardOffset = Vector3.new(7, 0, 0)
     
-    guardConnection = RunService.Heartbeat:Connect(function()
-        if not botPlayer.Character or not targetPlayer.Character then
-            guardConnection:Disconnect()
-            return
-        end
+    local conn = RunService.Heartbeat:Connect(function()
+        if not bot.Character or not target.Character then conn:Disconnect() return end
         
-        local botHRP = botPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local botHumanoid = botPlayer.Character:FindFirstChildOfClass("Humanoid")
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        local bHum = bot.Character:FindFirstChildOfClass("Humanoid")
+        if not bHRP or not tHRP or not bHum then return end
         
-        if not botHRP or not targetHRP or not botHumanoid then return end
-        
-        -- Менять позицию каждые 5 секунд
-        if tick() - lastPositionChange > 5 then
-            lastPositionChange = tick()
+        if tick() - lastPosChange > 5 then
+            lastPosChange = tick()
             local angle = math.random() * math.pi * 2
             guardOffset = Vector3.new(math.cos(angle) * 7, 0, math.sin(angle) * 7)
         end
         
-        -- Стоять на позиции охраны
-        botHumanoid:MoveTo(targetHRP.Position + guardOffset)
+        bHum:MoveTo(tHRP.Position + guardOffset)
         
-        -- Проверить всех игроков вокруг
         for _, player in pairs(Players:GetPlayers()) do
-            if player ~= targetPlayer and player ~= botPlayer and player.Character then
-                local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
-                if playerHRP then
-                    local distanceToTarget = (playerHRP.Position - targetHRP.Position).Magnitude
+            if player ~= target and player ~= bot and player.Character then
+                local pHRP = player.Character:FindFirstChild("HumanoidRootPart")
+                if pHRP then
+                    local distToTarget = (pHRP.Position - tHRP.Position).Magnitude
+                    local distToBot = (pHRP.Position - bHRP.Position).Magnitude
                     
-                    -- Если враг в зоне атаки (8-12 studs)
-                    if distanceToTarget >= 8 and distanceToTarget <= 12 then
-                        botHumanoid:MoveTo(playerHRP.Position)
-                        wait(0.3)
-                        -- Флинг врага
-                        self:flingTarget(playerHRP)
+                    -- Если враг близко к защищаемому ИЛИ близко к боту
+                    if (distToTarget >= 5 and distToTarget <= 15) or distToBot < 10 then
+                        bHum:MoveTo(pHRP.Position)
+                        self:flingTarget(player)
                         break
                     end
                 end
             end
         end
         
-        -- Периодически делать действия
         if tick() - lastAction > 3 then
             lastAction = tick()
-            local randomAction = math.random(1, 3)
-            if randomAction == 1 then
-                -- Покружиться
-                botHRP.CFrame = botHRP.CFrame * CFrame.Angles(0, math.rad(90), 0)
-            elseif randomAction == 2 then
-                -- Подпрыгнуть
-                botHumanoid.Jump = true
+            if math.random(1, 3) == 1 then
+                bHRP.CFrame = bHRP.CFrame * CFrame.Angles(0, math.rad(90), 0)
+            elseif math.random(1, 3) == 2 then
+                bHum.Jump = true
             end
         end
     end)
     
-    self.ActiveEffects["guard"] = guardConnection
+    self.ActiveEffects["guard"] = conn
     return true
 end
 
--- Функция для показа команд (в одно сообщение)
-function CommandSystem:showCommands(ownerPlayer)
-    local commandsMessage = [[
-[BOT] Команды:
+function CommandSystem:showCommands()
+    local cmds = [[[BOT] Команды:
 .follow .headsit .carpet .fling
 .dance .like .bang .spin .jump  
 .goto .orbit .invite .look .reset
-.wave .guard .speed .stop .cmds
-]]
-    
-    -- Отправить в чат одним сообщением
-    game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync(commandsMessage)
+.wave .guard .speed .stop .cmds]]
+    self:sendMessage(cmds)
 end
 
--- Основная функция обработки команд
-function CommandSystem:processCommand(ownerPlayer, message)
-    if ownerPlayer.Name ~= OWNER_NAME then return end
+function CommandSystem:processCommand(owner, msg)
+    if owner.Name ~= OWNER_NAME then return end
     
     local args = {}
-    for word in message:gmatch("%S+") do
-        table.insert(args, word:lower())
-    end
-    
+    for word in msg:gmatch("%S+") do table.insert(args, word:lower()) end
     if #args == 0 then return end
     
-    local command = args[1]
+    local cmd = args[1]
     
-    if command == ".follow" and args[2] then
-        self:startFollow(args[2])
-        
-    elseif command == ".headsit" and args[2] then
-        self:startHeadsit(args[2])
-        
-    elseif command == ".carpet" and args[2] then
-        self:startCarpet(args[2])
-        
-    elseif command == ".fling" and args[2] then
-        if not self:startFling(args[2]) then
-            game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] too far!")
-        end
-        
-    elseif command == ".dance" and args[2] then
-        self:startDance(args[2])
-        
-    elseif command == ".like" and args[2] then
-        self:sendLike(args[2])
-        
-    elseif command == ".bang" and args[2] then
-        self:startBang(args[2])
-        
-    elseif command == ".spin" then
-        self:startSpin(args[2])
-        
-    elseif command == ".jump" then
-        self:startJump()
-        
-    elseif command == ".goto" and args[2] then
-        self:startGoto(args[2])
-        
-    elseif command == ".orbit" and args[2] then
-        self:startOrbit(args[2], args[3])
-        
-    elseif command == ".invite" and args[2] then
-        self:sendFriendRequest(args[2])
-        
-    elseif command == ".look" and args[2] then
-        self:startLook(args[2])
-        
-    elseif command == ".reset" then
-        self:resetBot()
-        
-    elseif command == ".wave" and args[2] then
-        if not self:startWave(args[2]) then
-            game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] too far!")
-        end
-        
-    elseif command == ".guard" and args[2] then
-        self:startGuard(args[2])
-        
-    elseif command == ".speed" and args[2] then
-        self:setSpeed(args[2])
-        
-    elseif command == ".stop" then
+    if cmd == ".follow" and args[2] then self:startFollow(args[2])
+    elseif cmd == ".headsit" and args[2] then self:startHeadsit(args[2])
+    elseif cmd == ".carpet" and args[2] then self:startCarpet(args[2])
+    elseif cmd == ".fling" and args[2] then if not self:startFling(args[2]) then self:sendMessage("too far!") end
+    elseif cmd == ".dance" and args[2] then self:startDance(args[2])
+    elseif cmd == ".like" and args[2] then self:sendLike(args[2])
+    elseif cmd == ".bang" and args[2] then self:startBang(args[2])
+    elseif cmd == ".spin" then self:startSpin(args[2])
+    elseif cmd == ".jump" then self:startJump()
+    elseif cmd == ".goto" and args[2] then self:startGoto(args[2])
+    elseif cmd == ".orbit" and args[2] then self:startOrbit(args[2], args[3])
+    elseif cmd == ".invite" and args[2] then self:sendFriendRequest(args[2])
+    elseif cmd == ".look" and args[2] then self:startLook(args[2])
+    elseif cmd == ".reset" then self:resetBot()
+    elseif cmd == ".wave" and args[2] then if not self:startWave(args[2]) then self:sendMessage("too far!") end
+    elseif cmd == ".guard" and args[2] then self:startGuard(args[2])
+    elseif cmd == ".speed" and args[2] then self:setSpeed(args[2])
+    elseif cmd == ".stop" then 
         self:stopAllEffects()
-        -- Сбросить скорость бота
-        local botPlayer = Players:FindFirstChild(BOT_NAME)
-        if botPlayer and botPlayer.Character then
-            local humanoid = botPlayer.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid.WalkSpeed = 16
-            end
+        local bot = Players:FindFirstChild(BOT_NAME)
+        if bot and bot.Character then
+            local hum = bot.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed = 16 end
         end
-        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] stopped all actions")
-        
-    elseif command == ".cmds" then
-        self:showCommands(ownerPlayer)
-    end
+        self:sendMessage("stopped all actions")
+    elseif cmd == ".cmds" then self:showCommands() end
 end
 
--- Инициализация системы
 function CommandSystem:init()
-    Players.PlayerAdded:Connect(function(player)
-        player.Chatted:Connect(function(message)
-            self:processCommand(player, message)
-        end)
-    end)
-    
-    -- Обработка уже подключенных игроков
     for _, player in pairs(Players:GetPlayers()) do
-        player.Chatted:Connect(function(message)
-            self:processCommand(player, message)
-        end)
+        player.Chatted:Connect(function(msg) self:processCommand(player, msg) end)
     end
+    Players.PlayerAdded:Connect(function(player)
+        player.Chatted:Connect(function(msg) self:processCommand(player, msg) end)
+    end)
     
     print("Бот активирован! Владелец: " .. OWNER_NAME)
     print("Бот: " .. BOT_NAME)
-    print("Используйте .cmds для списка команд")
 end
 
--- Запуск системы
 CommandSystem:init()

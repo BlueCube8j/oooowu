@@ -2,8 +2,8 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
-local OWNER_NAME = "ryveliq"
-local BOT_NAME = "NoNameDarkTouched"
+local OWNER_NAME = "flyffyx1"
+local BOT_NAME = "FireBybsa"
 
 local CommandSystem = {ActiveEffects = {}}
 

@@ -32,8 +32,11 @@ end
 
 function CommandSystem:sendMessage(msg)
     pcall(function()
-        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] " .. msg)
+        game:GetService("TextChatService"):SendAsync("[BOT] " .. msg)
     end)
+    
+    -- Для дебага всегда в консоль
+    print("[BOT]: " .. msg)
 end
 
 function CommandSystem:flingTarget(targetPlayer)
@@ -436,7 +439,12 @@ function CommandSystem:showCommands()
 end
 
 function CommandSystem:processCommand(owner, msg)
-    if owner.Name ~= OWNER_NAME then return end
+    print("[CMD] " .. owner.Name .. ": " .. msg)
+    
+    if owner.Name ~= OWNER_NAME then 
+        print("[CMD] Отклонено: не владелец")
+        return 
+    end
     
     local args = {}
     for word in msg:gmatch("%S+") do table.insert(args, word:lower()) end
@@ -470,6 +478,8 @@ function CommandSystem:processCommand(owner, msg)
         end
         self:sendMessage("stopped all actions")
     elseif cmd == ".cmds" then self:showCommands() end
+    
+    print("[CMD] Выполнено: " .. cmd)
 end
 
 function CommandSystem:init()
@@ -482,6 +492,7 @@ function CommandSystem:init()
     
     print("Бот активирован! Владелец: " .. OWNER_NAME)
     print("Бот: " .. BOT_NAME)
+    print("Используй .cmds для списка команд")
 end
 
-CommandSystem:init()
+CommandSystem:init() 

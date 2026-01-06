@@ -42,21 +42,21 @@ function CommandSystem:flingTarget(targetPlayer)
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return false end
 
-    -- Создаем BodyThrust на цели
-    local thrust = Instance.new("BodyThrust")
-    thrust.Force = Vector3.new(100000, 100000, 100000)
-    thrust.Location = targetHRP.Position
-    thrust.Parent = targetHRP
+    -- Резкий импульс ВВЕРХ
+    targetHRP.Velocity = Vector3.new(
+        math.random(-50000, 50000),
+        math.random(50000, 100000),  -- Сильно вверх
+        math.random(-50000, 50000)
+    )
     
-    -- Даем дополнительный импульс
-    targetHRP.Velocity = Vector3.new(50000, 50000, 50000)
+    task.wait(0.1)
     
-    -- Ждем и убираем thrust
-    wait(0.2)
-    thrust:Destroy()
-    
-    -- Телепортируем высоко
-    targetHRP.CFrame = CFrame.new(0, 100000, 0)
+    -- Телепорт в космос
+    pcall(function()
+        if targetHRP and targetHRP.Parent then
+            targetHRP.CFrame = CFrame.new(0, 100000, 0)
+        end
+    end)
     
     return true
 end
@@ -102,7 +102,10 @@ function CommandSystem:startHeadsit(targetName)
     self:stopAllEffects()
     
     local hum = bot.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.Sit = true end
+    if hum then 
+        hum.Sit = true 
+        hum.PlatformStand = true
+    end
     
     local conn = RunService.Heartbeat:Connect(function()
         if not bot.Character or not target.Character then conn:Disconnect() return end
@@ -112,6 +115,7 @@ function CommandSystem:startHeadsit(targetName)
         if not bHRP or not tHRP then return end
         
         bHRP.CFrame = CFrame.new(tHRP.Position + Vector3.new(0, 4, 0))
+        if hum then hum.Sit = true end
     end)
     
     self.ActiveEffects["headsit"] = conn
@@ -291,16 +295,18 @@ function CommandSystem:startOrbit(targetName, speed)
     
     local angle = 0
     local spd = tonumber(speed) or 20
-    local conn = RunService.Heartbeat:Connect(function()
+    local conn = RunService.Heartbeat:Connect(function(dt)
         if not bot.Character or not target.Character then conn:Disconnect() return end
         
         local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
         local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
         if not bHRP or not tHRP then return end
         
-        angle = angle + spd * 0.01
+        angle = angle + spd * dt
         local x, z = math.cos(angle) * 5, math.sin(angle) * 5
-        bHRP.CFrame = CFrame.new(tHRP.Position + Vector3.new(x, 2, z))
+        local orbitPos = tHRP.Position + Vector3.new(x, 2, z)
+        
+        bHRP.CFrame = CFrame.lookAt(orbitPos, Vector3.new(tHRP.Position.X, orbitPos.Y, tHRP.Position.Z))
     end)
     
     self.ActiveEffects["orbit"] = conn
@@ -397,7 +403,7 @@ function CommandSystem:startGuard(targetName)
                     local distToBot = (pHRP.Position - bHRP.Position).Magnitude
                     
                     -- Если враг близко к защищаемому ИЛИ близко к боту
-                    if (distToTarget >= 5 and distToTarget <= 15) or distToBot < 10 then
+                    if distToTarget <= 15 or distToBot < 10 then
                         bHum:MoveTo(pHRP.Position)
                         self:flingTarget(player)
                         break

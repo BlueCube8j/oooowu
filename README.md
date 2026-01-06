@@ -1,1 +1,1 @@
-https://raw.githubusercontent.com/BlueCube8j/oooowu/refs/heads/main/kkkjh7
+loadstring(game:Httpget("https://raw.githubusercontent.com/BlueCube8j/Pls_donate/refs/heads/main/AutoChat"))()

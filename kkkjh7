@@ -32,11 +32,8 @@ end
 
 function CommandSystem:sendMessage(msg)
     pcall(function()
-        game:GetService("TextChatService"):SendAsync("[BOT] " .. msg)
+        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("[BOT] " .. msg)
     end)
-    
-    -- Для дебага всегда в консоль
-    print("[BOT]: " .. msg)
 end
 
 function CommandSystem:flingTarget(targetPlayer)
@@ -45,21 +42,9 @@ function CommandSystem:flingTarget(targetPlayer)
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return false end
 
-    -- Резкий импульс ВВЕРХ
-    targetHRP.Velocity = Vector3.new(
-        math.random(-50000, 50000),
-        math.random(50000, 100000),  -- Сильно вверх
-        math.random(-50000, 50000)
-    )
-    
+    targetHRP.Velocity = Vector3.new(math.random(-50000, 50000), 100000, math.random(-50000, 50000))
     task.wait(0.1)
-    
-    -- Телепорт в космос
-    pcall(function()
-        if targetHRP and targetHRP.Parent then
-            targetHRP.CFrame = CFrame.new(0, 100000, 0)
-        end
-    end)
+    targetHRP.CFrame = CFrame.new(0, 100000, 0)
     
     return true
 end
@@ -105,10 +90,7 @@ function CommandSystem:startHeadsit(targetName)
     self:stopAllEffects()
     
     local hum = bot.Character:FindFirstChildOfClass("Humanoid")
-    if hum then 
-        hum.Sit = true 
-        hum.PlatformStand = true
-    end
+    if hum then hum.Sit = true end
     
     local conn = RunService.Heartbeat:Connect(function()
         if not bot.Character or not target.Character then conn:Disconnect() return end
@@ -118,7 +100,6 @@ function CommandSystem:startHeadsit(targetName)
         if not bHRP or not tHRP then return end
         
         bHRP.CFrame = CFrame.new(tHRP.Position + Vector3.new(0, 4, 0))
-        if hum then hum.Sit = true end
     end)
     
     self.ActiveEffects["headsit"] = conn
@@ -305,11 +286,11 @@ function CommandSystem:startOrbit(targetName, speed)
         local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
         if not bHRP or not tHRP then return end
         
-        angle = angle + spd * dt
+        angle = angle + spd * dt * 2
         local x, z = math.cos(angle) * 5, math.sin(angle) * 5
         local orbitPos = tHRP.Position + Vector3.new(x, 2, z)
         
-        bHRP.CFrame = CFrame.lookAt(orbitPos, Vector3.new(tHRP.Position.X, orbitPos.Y, tHRP.Position.Z))
+        bHRP.CFrame = CFrame.lookAt(orbitPos, tHRP.Position)
     end)
     
     self.ActiveEffects["orbit"] = conn
@@ -405,7 +386,6 @@ function CommandSystem:startGuard(targetName)
                     local distToTarget = (pHRP.Position - tHRP.Position).Magnitude
                     local distToBot = (pHRP.Position - bHRP.Position).Magnitude
                     
-                    -- Если враг близко к защищаемому ИЛИ близко к боту
                     if distToTarget <= 15 or distToBot < 10 then
                         bHum:MoveTo(pHRP.Position)
                         self:flingTarget(player)
@@ -439,12 +419,7 @@ function CommandSystem:showCommands()
 end
 
 function CommandSystem:processCommand(owner, msg)
-    print("[CMD] " .. owner.Name .. ": " .. msg)
-    
-    if owner.Name ~= OWNER_NAME then 
-        print("[CMD] Отклонено: не владелец")
-        return 
-    end
+    if owner.Name ~= OWNER_NAME then return end
     
     local args = {}
     for word in msg:gmatch("%S+") do table.insert(args, word:lower()) end
@@ -478,8 +453,6 @@ function CommandSystem:processCommand(owner, msg)
         end
         self:sendMessage("stopped all actions")
     elseif cmd == ".cmds" then self:showCommands() end
-    
-    print("[CMD] Выполнено: " .. cmd)
 end
 
 function CommandSystem:init()
@@ -492,7 +465,6 @@ function CommandSystem:init()
     
     print("Бот активирован! Владелец: " .. OWNER_NAME)
     print("Бот: " .. BOT_NAME)
-    print("Используй .cmds для списка команд")
 end
 
-CommandSystem:init() 
+CommandSystem:init()

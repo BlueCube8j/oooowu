@@ -14,10 +14,641 @@ local BOT_NAMES = {
 local CommandSystem = {
     ActiveEffects = {},
     ActiveBots = {},
-    CurrentMode = "single", -- "single" или "all"
+    CurrentMode = "single",
     SelectedBotIndex = 1
 }
 
 function CommandSystem:initBots()
     self.ActiveBots = {}
-    for _, botName in pairs(BOT_NAM 
+    for _, botName in pairs(BOT_NAMES) do
+        local bot = Players:FindFirstChild(botName)
+        if bot then
+            table.insert(self.ActiveBots, bot)
+        end
+    end
+end
+
+function CommandSystem:getActiveBot()
+    if self.CurrentMode == "all" then
+        return nil -- все боты
+    else
+        return self.ActiveBots[self.SelectedBotIndex]
+    end
+end
+
+function CommandSystem:forEachBot(callback)
+    if self.CurrentMode == "all" then
+        for _, bot in pairs(self.ActiveBots) do
+            if bot and bot.Character then
+                callback(bot)
+            end
+        end
+    else
+        local bot = self.ActiveBots[self.SelectedBotIndex]
+        if bot and bot.Character then
+            callback(bot)
+        end
+    end
+end
+
+function CommandSystem:findPlayerByName(partialName)
+    local partialNameLower = partialName:lower()
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Name:lower():find(partialNameLower, 1, true) then
+            return player
+        end
+    end
+    
+    return nil
+end
+
+function CommandSystem:stopAllEffects()
+    for _, v in pairs(self.ActiveEffects) do v:Disconnect() end
+    self.ActiveEffects = {}
+end
+
+function CommandSystem:getDistance(p1, p2)
+    if not p1.Character or not p2.Character then return 999 end
+    local h1, h2 = p1.Character:FindFirstChild("HumanoidRootPart"), p2.Character:FindFirstChild("HumanoidRootPart")
+    return h1 and h2 and (h1.Position - h2.Position).Magnitude or 999
+end
+
+function CommandSystem:setSpeed(speed)
+    self:forEachBot(function(bot)
+        local hum = bot.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = tonumber(speed) or 16 end
+    end)
+    self:sendMessage("Speed set to " .. (tonumber(speed) or 16))
+    return true
+end
+
+function CommandSystem:sendMessage(msg)
+    pcall(function()
+        game:GetService("TextChatService"):SendAsync("[BOT] " .. msg)
+    end)
+end
+
+function CommandSystem:flingTarget(targetPlayer)
+    if not targetPlayer or not targetPlayer.Character then return false end
+    
+    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then return false end
+
+    targetHRP.Velocity = Vector3.new(math.random(-50000, 50000), 100000, math.random(-50000, 50000))
+    task.wait(0.1)
+    targetHRP.CFrame = CFrame.new(0, 100000, 0)
+    
+    return true
+end
+
+function CommandSystem:startFollow(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+
+    self:stopAllEffects()
+    
+    local lastPosChange = tick()
+    local offsets = {}
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        local botCount = self.CurrentMode == "all" and #self.ActiveBots or 1
+        
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character or not target.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+            local bHum = bot.Character:FindFirstChildOfClass("Humanoid")
+            
+            if not bHRP or not tHRP or not bHum then continue end
+            
+            if tick() - lastPosChange > math.random(5, 6) then
+                lastPosChange = tick()
+            end
+            
+            if not offsets[i] then
+                local angle = (i - 1) * (math.pi * 2 / botCount)
+                offsets[i] = Vector3.new(math.cos(angle) * 4, 0, math.sin(angle) * 4)
+            end
+            
+            if (tHRP.Position - bHRP.Position).Magnitude > 5 then
+                bHum:MoveTo(tHRP.Position + offsets[i])
+            end
+        end
+    end)
+    
+    self.ActiveEffects["follow"] = conn
+    return true
+end
+
+function CommandSystem:startHeadsit(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+
+    self:stopAllEffects()
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character or not target.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+            local bHum = bot.Character:FindFirstChildOfClass("Humanoid")
+            if not bHRP or not tHRP or not bHum then continue end
+            
+            if i == 1 then
+                bHum.Sit = true
+                bHum.PlatformStand = true
+                bHRP.CFrame = CFrame.new(tHRP.Position + Vector3.new(0, 4, 0))
+            else
+                local angle = (i - 1) * (math.pi * 2 / #self.ActiveBots)
+                local offset = Vector3.new(math.cos(angle) * 6, 0, math.sin(angle) * 6)
+                bHRP.CFrame = CFrame.new(tHRP.Position + offset + Vector3.new(0, 3, 0))
+            end
+        end
+    end)
+    
+    self.ActiveEffects["headsit"] = conn
+    return true
+end
+
+function CommandSystem:startCarpet(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+
+    self:stopAllEffects()
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character or not target.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+            if not bHRP or not tHRP then continue end
+            
+            local offset = Vector3.new(0, -3 * i, 0)
+            bHRP.CFrame = CFrame.new(tHRP.Position + offset)
+        end
+    end)
+    
+    self.ActiveEffects["carpet"] = conn
+    return true
+end
+
+function CommandSystem:startFling(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+
+    local activeBot = self:getActiveBot()
+    if self.CurrentMode == "single" and activeBot and self:getDistance(activeBot, target) > 200 then
+        return false
+    end
+
+    self:stopAllEffects()
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for _, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character or not target.Character then break end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+            local bHum = bot.Character:FindFirstChildOfClass("Humanoid")
+            
+            if not bHRP or not tHRP or not bHum then continue end
+            
+            if self:getDistance(bot, target) <= 40 then
+                self:flingTarget(target)
+            else
+                bHum:MoveTo(tHRP.Position)
+            end
+        end
+    end)
+    
+    self.ActiveEffects["fling"] = conn
+    return true
+end
+
+function CommandSystem:startDance(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+
+    self:stopAllEffects()
+    
+    local angles = {}
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character or not target.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+            if not bHRP or not tHRP then continue end
+            
+            if not angles[i] then angles[i] = 0 end
+            angles[i] = angles[i] + 0.1
+            
+            local angle = angles[i] + (i - 1) * (math.pi * 2 / #self.ActiveBots)
+            local x, z = math.cos(angle) * 3, math.sin(angle) * 3
+            bHRP.CFrame = CFrame.new(tHRP.Position + Vector3.new(x, 0, z)) * CFrame.Angles(0, angles[i], 0)
+        end
+    end)
+    
+    self.ActiveEffects["dance"] = conn
+    return true
+end
+
+function CommandSystem:sendLike(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target then return false end
+
+    local activeBot = self:getActiveBot()
+    if activeBot and self:getDistance(activeBot, target) > 100 then
+        self:sendMessage("too far!")
+        return false
+    end
+
+    local compliments = {"hey! you got awesome skin", "hii, you look good!", "I almost fainted, when I saw your skin", "wow, amazing avatar!", "youre looking great today!"}
+    self:sendMessage(compliments[math.random(1, #compliments)])
+    return true
+end
+
+function CommandSystem:startBang(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+
+    self:stopAllEffects()
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character or not target.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+            if not bHRP or not tHRP then continue end
+            
+            local offset = Vector3.new(0, 0, -3 * i)
+            bHRP.CFrame = CFrame.new(tHRP.Position + offset) * CFrame.Angles(0, math.pi, 0)
+        end
+    end)
+    
+    self.ActiveEffects["bang"] = conn
+    return true
+end
+
+function CommandSystem:startSpin(speed)
+    self:stopAllEffects()
+    
+    local angles = {}
+    local spd = tonumber(speed) or 30
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            if not bHRP then continue end
+            
+            if not angles[i] then angles[i] = 0 end
+            angles[i] = angles[i] + spd * 0.1
+            bHRP.CFrame = bHRP.CFrame * CFrame.Angles(0, math.rad(angles[i]), 0)
+        end
+    end)
+    
+    self.ActiveEffects["spin"] = conn
+    return true
+end
+
+function CommandSystem:startJump()
+    self:stopAllEffects()
+    
+    local lastJumps = {}
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character then continue end
+            
+            local hum = bot.Character:FindFirstChildOfClass("Humanoid")
+            if not hum then continue end
+            
+            if not lastJumps[i] then lastJumps[i] = 0 end
+            
+            if tick() - lastJumps[i] > 2 then
+                lastJumps[i] = tick()
+                hum.Jump = true
+            end
+        end
+    end)
+    
+    self.ActiveEffects["jump"] = conn
+    return true
+end
+
+function CommandSystem:startGoto(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+    
+    for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+        if not bot or not bot.Character then continue end
+        
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        if not bHRP or not tHRP then continue end
+        
+        local offset = Vector3.new(3 * i, 0, 3 * i)
+        bHRP.CFrame = tHRP.CFrame + offset
+    end
+    return true
+end
+
+function CommandSystem:startOrbit(targetName, speed)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+    
+    self:stopAllEffects()
+    
+    local angles = {}
+    local spd = tonumber(speed) or 20
+    
+    local conn = RunService.Heartbeat:Connect(function(dt)
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character or not target.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+            if not bHRP or not tHRP then continue end
+            
+            if not angles[i] then angles[i] = (i - 1) * (math.pi * 2 / #self.ActiveBots) end
+            angles[i] = angles[i] + spd * dt * 2
+            
+            local radius = 5 + (i - 1) * 2
+            local x, z = math.cos(angles[i]) * radius, math.sin(angles[i]) * radius
+            local orbitPos = tHRP.Position + Vector3.new(x, 2, z)
+            
+            bHRP.CFrame = CFrame.lookAt(orbitPos, tHRP.Position)
+        end
+    end)
+    
+    self.ActiveEffects["orbit"] = conn
+    return true
+end
+
+function CommandSystem:sendFriendRequest(targetName)
+    self:sendMessage("Sent friend request to " .. targetName)
+    return true
+end
+
+function CommandSystem:startLook(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+
+    self:stopAllEffects()
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for _, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character or not target.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+            if not bHRP or not tHRP then continue end
+            
+            local lookAt = tHRP.Position
+            bHRP.CFrame = CFrame.lookAt(bHRP.Position, Vector3.new(lookAt.X, bHRP.Position.Y, lookAt.Z))
+        end
+    end)
+    
+    self.ActiveEffects["look"] = conn
+    return true
+end
+
+function CommandSystem:resetBot()
+    self:stopAllEffects()
+    self:forEachBot(function(bot)
+        if bot.Character then bot.Character:BreakJoints() end
+    end)
+    return true
+end
+
+function CommandSystem:startWave(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+
+    local activeBot = self:getActiveBot()
+    if activeBot and self:getDistance(activeBot, target) > 100 then
+        return false
+    end
+
+    self:stopAllEffects()
+    
+    for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+        if not bot or not bot.Character then continue end
+        
+        local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+        local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+        if bHRP and tHRP then
+            local offset = Vector3.new(5 * i, 0, 5 * i)
+            bHRP.CFrame = tHRP.CFrame + offset
+        end
+    end
+    
+    self:sendMessage("Hello " .. targetName)
+    return true
+end
+
+function CommandSystem:startGuard(targetName)
+    local target = self:findPlayerByName(targetName)
+    if not target or not target.Character then return false end
+
+    self:stopAllEffects()
+    
+    local lastActions = {}
+    local guardOffsets = {}
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character or not target.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+            local bHum = bot.Character:FindFirstChildOfClass("Humanoid")
+            if not bHRP or not tHRP or not bHum then continue end
+            
+            if not guardOffsets[i] then
+                local angle = math.random() * math.pi * 2
+                guardOffsets[i] = Vector3.new(math.cos(angle) * (5 + i), 0, math.sin(angle) * (5 + i))
+            end
+            
+            bHum:MoveTo(tHRP.Position + guardOffsets[i])
+            
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= target and player ~= bot and player.Character then
+                    local pHRP = player.Character:FindFirstChild("HumanoidRootPart")
+                    if pHRP then
+                        local distToTarget = (pHRP.Position - tHRP.Position).Magnitude
+                        local distToBot = (pHRP.Position - bHRP.Position).Magnitude
+                        
+                        if distToTarget <= 15 or distToBot < 10 then
+                            bHRP.CFrame = CFrame.new(pHRP.Position + Vector3.new(2, 0, 2))
+                            self:flingTarget(player)
+                            break
+                        end
+                    end
+                end
+            end
+            
+            if not lastActions[i] then lastActions[i] = 0 end
+            
+            if tick() - lastActions[i] > 3 then
+                lastActions[i] = tick()
+                if math.random(1, 3) == 1 then
+                    bHRP.CFrame = bHRP.CFrame * CFrame.Angles(0, math.rad(90), 0)
+                elseif math.random(1, 3) == 2 then
+                    bHum.Jump = true
+                end
+            end
+        end
+    end)
+    
+    self.ActiveEffects["guard"] = conn
+    return true
+end
+
+function CommandSystem:startRandom()
+    self:stopAllEffects()
+    
+    local lastMove = {}
+    local lastJump = {}
+    local lastMessage = 0
+    local messages = {
+        "Your skin is so beautiful",
+        "Wow! Cool game",
+        "Nice avatar",
+        "Looking good",
+        "Awesome game",
+        "Great skin",
+        "Cool outfit",
+        "Amazing",
+        "Perfect",
+        "Fantastic"
+    }
+    
+    local conn = RunService.Heartbeat:Connect(function()
+        for i, bot in pairs(self.CurrentMode == "all" and self.ActiveBots or {self.ActiveBots[self.SelectedBotIndex]}) do
+            if not bot or not bot.Character then continue end
+            
+            local bHRP = bot.Character:FindFirstChild("HumanoidRootPart")
+            local bHum = bot.Character:FindFirstChildOfClass("Humanoid")
+            if not bHRP or not bHum then continue end
+            
+            if not lastMove[i] then lastMove[i] = 0 end
+            if not lastJump[i] then lastJump[i] = 0 end
+            
+            -- Рандомное движение каждые 5 секунд
+            if tick() - lastMove[i] > math.random(4, 6) then
+                lastMove[i] = tick()
+                local randomPos = Vector3.new(
+                    math.random(-100, 100),
+                    0,
+                    math.random(-100, 100)
+                )
+                bHum:MoveTo(bHRP.Position + randomPos)
+            end
+            
+            -- Рандомные прыжки каждые 15 секунд
+            if tick() - lastJump[i] > math.random(13, 17) then
+                lastJump[i] = tick()
+                for jumpCount = 1, math.random(1, 3) do
+                    task.wait(0.2)
+                    bHum.Jump = true
+                end
+            end
+        end
+        
+        -- Сообщения каждые 20-40 секунд
+        if tick() - lastMessage > math.random(20, 40) then
+            lastMessage = tick()
+            pcall(function()
+                game:GetService("TextChatService"):SendAsync(messages[math.random(1, #messages)])
+            end)
+        end
+    end)
+    
+    self.ActiveEffects["random"] = conn
+    return true
+end
+
+function CommandSystem:showCommands()
+    local cmds = "Commands: .follow .headsit .carpet .fling .dance .like .bang .spin .jump .goto .orbit .invite .look .reset .wave .guard .speed .stop .cmds .switch .bots .all .random"
+    self:sendMessage(cmds)
+end
+
+function CommandSystem:processCommand(owner, msg)
+    if owner.Name ~= OWNER_NAME then return end
+    
+    local args = {}
+    for word in msg:gmatch("%S+") do table.insert(args, word:lower()) end
+    if #args == 0 then return end
+    
+    local cmd = args[1]
+    
+    if cmd == ".switch" and args[2] then
+        local index = tonumber(args[2])
+        if index and index >= 1 and index <= #BOT_NAMES then
+            self.SelectedBotIndex = index
+            self.CurrentMode = "single"
+            self:sendMessage("Switched to bot " .. index .. ": " .. BOT_NAMES[index])
+        end
+    elseif cmd == ".all" then
+        self.CurrentMode = "all"
+        self:sendMessage("All bots active")
+    elseif cmd == ".bots" then
+        local botList = "Bots: "
+        for i, name in ipairs(BOT_NAMES) do
+            local status = Players:FindFirstChild(name) and "Online" or "Offline"
+            botList = botList .. i .. "." .. name .. "(" .. status .. ") "
+        end
+        self:sendMessage(botList)
+    elseif cmd == ".random" then
+        self:startRandom()
+    elseif cmd == ".follow" and args[2] then self:startFollow(args[2])
+    elseif cmd == ".headsit" and args[2] then self:startHeadsit(args[2])
+    elseif cmd == ".carpet" and args[2] then self:startCarpet(args[2])
+    elseif cmd == ".fling" and args[2] then if not self:startFling(args[2]) then self:sendMessage("too far!") end
+    elseif cmd == ".dance" and args[2] then self:startDance(args[2])
+    elseif cmd == ".like" and args[2] then self:sendLike(args[2])
+    elseif cmd == ".bang" and args[2] then self:startBang(args[2])
+    elseif cmd == ".spin" then self:startSpin(args[2])
+    elseif cmd == ".jump" then self:startJump()
+    elseif cmd == ".goto" and args[2] then self:startGoto(args[2])
+    elseif cmd == ".orbit" and args[2] then self:startOrbit(args[2], args[3])
+    elseif cmd == ".invite" and args[2] then self:sendFriendRequest(args[2])
+    elseif cmd == ".look" and args[2] then self:startLook(args[2])
+    elseif cmd == ".reset" then self:resetBot()
+    elseif cmd == ".wave" and args[2] then if not self:startWave(args[2]) then self:sendMessage("too far!") end
+    elseif cmd == ".guard" and args[2] then self:startGuard(args[2])
+    elseif cmd == ".speed" and args[2] then self:setSpeed(args[2])
+    elseif cmd == ".stop" then 
+        self:stopAllEffects()
+        self:forEachBot(function(bot)
+            local hum = bot.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed = 16 end
+        end)
+        self:sendMessage("stopped all actions")
+    elseif cmd == ".cmds" then self:showCommands() end
+end
+
+function CommandSystem:init()
+    self:initBots()
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        player.Chatted:Connect(function(msg) self:processCommand(player, msg) end)
+    end
+    Players.PlayerAdded:Connect(function(player)
+        player.Chatted:Connect(function(msg) self:processCommand(player, msg) end)
+    end)
+    
+    print("Bot activated! Owner: " .. OWNER_NAME)
+    print("Bots initialized: " .. #self.ActiveBots)
+end
+
+CommandSystem:init()
